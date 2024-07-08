@@ -6,6 +6,7 @@ from app.handlers import router
 from app.database.data import initialize_db
 from dotenv import load_dotenv
 import os
+import signal
 
 load_dotenv()
 
@@ -23,12 +24,30 @@ async def main():
     dp = Dispatcher(storage=storage)
     dp.include_router(router)
 
+    async def on_shutdown(dispatcher: Dispatcher):
+        logging.info("Shutting down dispatcher...")
+        await dispatcher.storage.close()
+        await dispatcher.storage.wait_closed()
+        await bot.session.close()
+        logging.info("Bot shutdown completed.")
+
     try:
         await dp.start_polling(bot)
-    except KeyboardInterrupt:
-        logging.warning("Bot has been turned off")
+    except (KeyboardInterrupt, SystemExit):
+        logging.warning("Bot has been interrupted")
     finally:
-        await bot.session.close()
+        await on_shutdown(dp)
+
+def handle_sigterm():
+    raise KeyboardInterrupt
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, handle_sigterm)
+    try:
+        loop.run_until_complete(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.warning("Bot has been interrupted")
+    finally:
+        loop.close()
